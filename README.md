@@ -60,7 +60,10 @@ You can run `loadAddresses.py` again to get the latest data from the IL State Bo
 
 ## Running Dedupe Geocoder
 
-# to run locally
+To run locally:
+
+```
+workon dedupe-geocoder
 python runserver.py
 ```
 
