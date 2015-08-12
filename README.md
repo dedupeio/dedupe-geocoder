@@ -41,7 +41,8 @@ Before we can run the website, we need to create a database.
 createdb geocoder
 ```
 
-Then, we run the `loadAddresses.py` script to download our data from the Cook County data portal.
+Then, we run the `loadAddresses.py` script to download our data from the Cook
+County data portal.
 
 ```bash
 python loadAddresses.py --download --load_data 
@@ -49,13 +50,15 @@ python loadAddresses.py --download --load_data
 
 This command will take between 15-45 min depending on your internet connection.
 
-You can run `loadAddresses.py` again to get the latest data from the IL State Board of Elections. It is updated daily. Other useful flags are:
+You can run `loadAddresses.py` again to get the latest data from the Cook
+County, add more training data, or create a table of block keys for dedupe to
+use to match new records. Useful flags are:
 
 ```
- --download               Downloading fresh data
- --load_data              Load data into database
- --train                  Add more training data
- --block                  After training, create the block table used by dedupe for matching
+ --download     Download fresh address data.
+ --load_data    Load downloaded address data into database.
+ --train        Add more training data and save settings file.
+ --block        After training, create the block table used by dedupe for matching.
  ```
 
 ## Running Dedupe Geocoder
