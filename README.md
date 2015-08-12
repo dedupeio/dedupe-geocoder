@@ -25,8 +25,6 @@ cp geocoder/app_config.py.example geocoder/app_config.py
 
 In `app_config.py`, put your Postgres user in `DB_USER` and password in `DB_PW`.
 
-  NOTE: Mac users might need this [lxml workaround](http://stackoverflow.com/questions/22313407/clang-error-unknown-argument-mno-fused-madd-python-package-installation-fa).
-
 Afterwards, whenever you want to work on dedupe-geocoder,
 
 ```bash
