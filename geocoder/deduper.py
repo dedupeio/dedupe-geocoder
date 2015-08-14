@@ -81,9 +81,9 @@ class StaticDatabaseGazetteer(StaticGazetteer):
             conn.execute(''' 
                 CREATE TABLE {0} (
                     block_key VARCHAR, 
-                    id INTEGER
+                    {1} INTEGER
                 )
-                '''.format(match_blocks_table))
+                '''.format(match_blocks_table, primary_key))
 
         sel = ''' 
             SELECT 
@@ -101,9 +101,9 @@ class StaticDatabaseGazetteer(StaticGazetteer):
 
             ins = '''
                 INSERT INTO {0} 
-                     (block_key, id) 
+                     (block_key, {1}) 
                      VALUES (%s, %s)
-                '''.format(match_blocks_table)
+                '''.format(match_blocks_table, primary_key)
 
             write_conn = self.engine.raw_connection()
             curs = write_conn.cursor()
@@ -144,24 +144,22 @@ class AddressLinkGazetteer(StaticDatabaseGazetteer):
             'messy_blocks_table': '<table_name>',
         }
 
-        optionally one can add `primary_key` and `address_field` to indicate
-        how those are stored in the messy_data_table
+        optionally one can add `primary_key` to indicate
+        how it are stored in the messy_data_table
         '''
 
         primary_key = messy_data.get('primary_key', 'id')
-        address_field = messy_data.get('address_field', 'complete_address')
 
         messy_blocks = ''' 
             SELECT 
               blocks.{0} AS blocked_record_id,
               array_agg(blocks.block_key) AS block_keys,
-              MAX(messy_data.{1}) AS complete_address
-            FROM {2} AS blocks
-            JOIN {3} AS messy_data
+              MAX(messy_data.complete_address) AS complete_address
+            FROM {1} AS blocks
+            JOIN {2} AS messy_data
               USING({0})
             GROUP BY {0}
         '''.format(primary_key,
-                   address_field,
                    messy_data['messy_blocks_table'], 
                    messy_data['messy_data_table'])
         

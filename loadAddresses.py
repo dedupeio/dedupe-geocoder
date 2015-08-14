@@ -4,66 +4,20 @@ from simpledbf import Dbf5
 import re
 import os
 import sqlalchemy as sa
+from geocoder.data_loader import ETLThing
 
-cook_county_data_portal = 'https://datacatalog.cookcountyil.gov/api/geospatial/%s?method=export&format=Original'
+class CookCountyETL(ETLThing):
 
-four_by_fours = {
-    'chicago': 'jev2-4wjs', 
-    'suburbs': '6mf5-x8ic'
-}
-
-
-class ETLThing(object):
-
-    def __init__(self, connection):
-        self.connection = connection
-        self.zip_file_path = 'downloads/%s_addresses.zip' % self.region_name
-        self.csv_file_path = 'downloads/%s_addresses.csv' % self.region_name
-    
-    def run(self, download=False):
+    def download(self, download_url=None):
         
-        if download:
-            self.download()
-        
-        self.createTable()
-        self.bulkInsertData()
-
-    def download(self):
-        url = cook_county_data_portal % four_by_fours[self.region_name]
-        
-        addresses = requests.get(url, stream=True)
+        addresses = requests.get(download_url, stream=True)
         
         with open(self.zip_file_path, 'wb') as f:
             for chunk in addresses.iter_content(chunk_size=1024):
                 if chunk:
                     f.write(chunk)
                     f.flush()
-        
-    def slugify(self, text, delim='_'):
-        if text:
-            punct_re = re.compile(r'[\t !"#$%&\'()*\-/<=>?@\[\\\]^_`{|},.:;]+')
-            result = []
-            for word in punct_re.split(text.lower()):
-                if word:
-                    result.append(str(word))
-            return delim.join(result)
-        else: # pragma: no cover
-            return text
     
-    def executeTransaction(self, query, raise_exc=False, *args, **kwargs):
-        trans = self.connection.begin()
-
-        try:
-            if kwargs:
-                self.connection.execute(query, **kwargs)
-            else:
-                self.connection.execute(query, *args)
-            trans.commit()
-        except sa.exc.ProgrammingError as e:
-            trans.rollback()
-            if raise_exc:
-                raise e
-
     def createTable(self):
         dbf_file_path = ''
 
@@ -109,31 +63,6 @@ class ETLThing(object):
             os.remove(self.csv_file_path)
 
         dbf.to_csv(self.csv_file_path, header=False, chunksize=1024)
-
-    def bulkInsertData(self):
-        import psycopg2
-        from geocoder.app_config import DB_USER, DB_PW, DB_HOST, \
-            DB_PORT, DB_NAME
-        
-        DB_CONN_STR = 'host={0} dbname={1} user={2} port={3}'\
-            .format(DB_HOST, DB_NAME, DB_USER, DB_PORT)
-
-        copy_st = ''' 
-            COPY {0} ({1}) FROM STDIN WITH (FORMAT CSV, DELIMITER ',', FORCE_NULL ({1}))
-        '''.format(self.table_name, ','.join(self.fieldnames))
-        
-        with open(self.csv_file_path, 'r') as f:
-            next(f)
-            with psycopg2.connect(DB_CONN_STR) as conn:
-                with conn.cursor() as curs:
-                    try:
-                        curs.copy_expert(copy_st, f)
-                    except psycopg2.IntegrityError as e:
-                        logger.error(e, exc_info=True)
-                        print(e)
-                        conn.rollback()
-        
-        # os.remove(self.csv_file_path)
     
     def mergeTables(self):
         final_fields = ''' 
@@ -211,14 +140,16 @@ class ETLThing(object):
         '''
 
         self.executeTransaction(add_pk)
-        
-class ChicagoETL(ETLThing):
+
+class ChicagoETL(CookCountyETL):
     region_name = 'chicago'
     table_name = 'chicago_addresses'
+    zip_file_path = 'downloads/chicago_addresses.zip'
 
-class SuburbsETL(ETLThing):
+class SuburbsETL(CookCountyETL):
     region_name = 'suburbs'
     table_name = 'suburban_addresses'
+    zip_file_path = 'downloads/suburbs_addresses.zip'
 
 if __name__ == "__main__":
     import argparse
@@ -246,15 +177,31 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     
+    cook_county_data_portal = 'https://datacatalog.cookcountyil.gov/api/geospatial/%s?method=export&format=Original'
+
+    four_by_fours = {
+        'chicago': 'jev2-4wjs', 
+        'suburbs': '6mf5-x8ic'
+    }
+    
     if args.load_data:
         engine = create_engine('postgresql://localhost:5432/geocoder')
         connection = engine.connect()
         
-        chicago = ChicagoETL(connection)
-        chicago.run(download=args.download)
+        chicago = ChicagoETL(connection, 'chicago_addresses')
+        download_url = None
+        
+        if args.download:
+            download_url = cook_county_data_portal % four_by_fours['chicago']
+        
+        chicago.run(download_url=download_url)
 
-        suburbs = SuburbsETL(connection)
-        suburbs.run(download=args.download)
+        suburbs = SuburbsETL(connection, 'suburban_addresses')
+        
+        if args.download:
+            download_url = cook_county_data_portal % four_by_fours['suburbs']
+        
+        suburbs.run(download_url=download_url)
         
         suburbs.mergeTables()
 
@@ -270,12 +217,12 @@ if __name__ == "__main__":
         deduper = DatabaseGazetteer([{'field': 'complete_address', 'type': 'Address'}],
                                     engine=engine)
 
-        messy_data = json.load(open('data/messy_addresses.json'))
+        messy_data = json.load(open('geocoder/data/messy_addresses.json'))
         deduper.drawSample(messy_data, sample_size=30000)
         
-        if os.path.exists('data/training.json'):
-            print('reading labeled examples from data/training.json')
-            with open('data/training.json') as tf :
+        if os.path.exists('geocoder/data/training.json'):
+            print('reading labeled examples from geocoder/data/training.json')
+            with open('geocoder/data/training.json') as tf :
                 deduper.readTraining(tf)
         
         dedupe.consoleLabel(deduper)
@@ -283,13 +230,13 @@ if __name__ == "__main__":
         deduper.train(ppc=0.1, index_predicates=False)
         
         # When finished, save our training away to disk
-        with open('data/training.json', 'w') as tf :
+        with open('geocoder/data/training.json', 'w') as tf :
             deduper.writeTraining(tf)
 
         # Save our weights and predicates to disk.  If the settings file
         # exists, we will skip all the training and learning next time we run
         # this file.
-        with open('geocoder/dedupe.settings', 'wb') as sf :
+        with open('geocoder/data/dedupe.settings', 'wb') as sf :
             deduper.writeSettings(sf)
 
         deduper.cleanupTraining()
@@ -299,7 +246,7 @@ if __name__ == "__main__":
 
         engine = create_engine('postgresql://localhost:5432/geocoder')
         
-        with open('geocoder/dedupe.settings', 'rb') as sf:
+        with open('geocoder/data/dedupe.settings', 'rb') as sf:
             deduper = StaticDatabaseGazetteer(sf, engine=engine)
         
         deduper.createMatchBlocksTable()

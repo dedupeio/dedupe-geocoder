@@ -28,6 +28,7 @@ def geocode():
         settings_file = os.path.abspath(
                             os.path.join(
                                 os.path.dirname(__file__), 
+                                'data',
                                 'dedupe.settings'))
 
         with open(settings_file, 'rb') as sf:
