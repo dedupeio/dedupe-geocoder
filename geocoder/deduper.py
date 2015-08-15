@@ -158,6 +158,7 @@ class AddressLinkGazetteer(StaticDatabaseGazetteer):
             FROM {1} AS blocks
             JOIN {2} AS messy_data
               USING({0})
+            WHERE messy_data.address_id IS NULL
             GROUP BY {0}
         '''.format(primary_key,
                    messy_data['messy_blocks_table'], 

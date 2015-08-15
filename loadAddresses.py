@@ -124,12 +124,12 @@ class CookCountyETL(ETLThing):
             document_s,
             comment
         '''
-
+        
+        # This is a little stupid since we are just loading chicago
+        # addresses but I am lazy and did not want to rewrite stuff.
         create_all_addresses = ''' 
             CREATE TABLE cook_county_addresses AS (
-                (SELECT {0} FROM chicago_addresses)
-                UNION ALL
-                (SELECT {0} FROM suburban_addresses)
+                SELECT {0} FROM chicago_addresses
             )
         '''.format(final_fields)
 
@@ -141,15 +141,29 @@ class CookCountyETL(ETLThing):
 
         self.executeTransaction(add_pk)
 
+        pin_index = ''' 
+            CREATE INDEX pin_idx ON cook_county_addresses (pin)
+        '''
+
+        self.executeTransaction(pin_index)
+        
+        pin_index = ''' 
+            CREATE INDEX address_id_idx ON cook_county_addresses (address_id)
+        '''
+
+        self.executeTransaction(pin_index)
+
 class ChicagoETL(CookCountyETL):
     region_name = 'chicago'
     table_name = 'chicago_addresses'
     zip_file_path = 'downloads/chicago_addresses.zip'
+    four_by_four = 'jev2-4wjs'
 
 class SuburbsETL(CookCountyETL):
     region_name = 'suburbs'
     table_name = 'suburban_addresses'
     zip_file_path = 'downloads/suburbs_addresses.zip'
+    four_by_four = '6mf5-x8ic'
 
 if __name__ == "__main__":
     import argparse
@@ -179,11 +193,6 @@ if __name__ == "__main__":
     
     cook_county_data_portal = 'https://datacatalog.cookcountyil.gov/api/geospatial/%s?method=export&format=Original'
 
-    four_by_fours = {
-        'chicago': 'jev2-4wjs', 
-        'suburbs': '6mf5-x8ic'
-    }
-    
     if args.load_data:
         engine = create_engine('postgresql://localhost:5432/geocoder')
         connection = engine.connect()
@@ -192,18 +201,20 @@ if __name__ == "__main__":
         download_url = None
         
         if args.download:
-            download_url = cook_county_data_portal % four_by_fours['chicago']
+            download_url = cook_county_data_portal % chicago.four_by_four
         
         chicago.run(download_url=download_url)
-
-        suburbs = SuburbsETL(connection, 'suburban_addresses')
+        chicago.mergeTables()
         
-        if args.download:
-            download_url = cook_county_data_portal % four_by_fours['suburbs']
-        
-        suburbs.run(download_url=download_url)
-        
-        suburbs.mergeTables()
+        # Skipping the suburbs for now
+        # suburbs = SuburbsETL(connection, 'suburban_addresses')
+        # 
+        # if args.download:
+        #     download_url = cook_county_data_portal % suburbs.four_by_four
+        # 
+        # suburbs.run(download_url=download_url)
+        # 
+        # suburbs.mergeTables()
 
         connection.close()
 

@@ -17,11 +17,80 @@ def checkForTable(engine, table_name):
                 % (args.name, ','.join(tables)))
         return None
 
+def trainIncoming(name):
+    from geocoder.deduper import DatabaseGazetteer
+    import simplejson as json
+    import dedupe
+
+    engine = create_engine('postgresql://localhost:5432/geocoder')
+    
+    deduper = DatabaseGazetteer([{'field': 'complete_address', 'type': 'Address'}],
+                                engine=engine)
+    
+    sql_table = checkForTable(engine, name)
+    
+    if sql_table == None:
+        sys.exit()
+
+    primary_key = sql_table.primary_key.columns.keys()[0]
+    
+    messy_table = ''' 
+        SELECT {0}, complete_address
+        FROM {1}
+        WHERE address_id IS NULL
+    '''.format(primary_key, name)
+
+    curs = engine.execute(messy_table)
+
+    messy_data = ({'complete_address': r.complete_address} for r in curs)
+
+    deduper.drawSample(messy_data, sample_size=30000)
+    
+    if os.path.exists('geocoder/data/training.json'):
+        print('reading labeled examples from geocoder/data/training.json')
+        with open('geocoder/data/training.json') as tf :
+            deduper.readTraining(tf)
+    
+    dedupe.consoleLabel(deduper)
+
+    deduper.train(ppc=0.1, index_predicates=False)
+    
+    # When finished, save our training away to disk
+    with open('geocoder/data/training.json', 'w') as tf :
+        deduper.writeTraining(tf)
+
+    # Save our weights and predicates to disk.  If the settings file
+    # exists, we will skip all the training and learning next time we run
+    # this file.
+    with open('geocoder/dedupe.settings', 'wb') as sf :
+        deduper.writeSettings(sf)
+
+    deduper.cleanupTraining()
+
+def blockIncoming(name, train):
+    from geocoder.deduper import StaticDatabaseGazetteer
+
+    engine = create_engine('postgresql://localhost:5432/geocoder')
+    
+    with open('geocoder/data/dedupe.settings', 'rb') as sf:
+        deduper = StaticDatabaseGazetteer(sf, engine=engine)
+    
+    # If we trained, re-block the county addresses table 
+    # in light of the newly trained settings file
+    if train:
+        deduper.createMatchBlocksTable()
+    
+    # Block the new table, too
+    deduper.createMatchBlocksTable(table_to_block=name,
+                                   match_blocks_table='%s_match_blocks' % name)
+
+
 if __name__ == "__main__":
     import argparse
     from sqlalchemy import create_engine
     from geocoder.data_loader import ETLThing
     import sys
+    import csv
 
     parser = argparse.ArgumentParser(
         description='Bulk link data to Cook County address data.'
@@ -78,73 +147,24 @@ if __name__ == "__main__":
         
         etl.run(download_url=args.download, messy=True)
 
+        add_address_id = ''' 
+            ALTER TABLE {0} ADD COLUMN address_id VARCHAR
+        '''.format(args.name)
+        
+        add_match_confidence = ''' 
+            ALTER TABLE {0} ADD COLUMN match_confidence DOUBLE PRECISION
+        '''.format(args.name)
+        
+        etl.executeTransaction(add_address_id)
+        etl.executeTransaction(add_match_confidence)
+
         connection.close()
 
     if args.train:
-        from geocoder.deduper import DatabaseGazetteer
-        import simplejson as json
-        import dedupe
-
-        engine = create_engine('postgresql://localhost:5432/geocoder')
-        
-        deduper = DatabaseGazetteer([{'field': 'complete_address', 'type': 'Address'}],
-                                    engine=engine)
-        
-        sql_table = checkForTable(engine, args.name)
-        
-        if sql_table == None:
-            sys.exit()
-
-        primary_key = sql_table.primary_key.columns.keys()[0]
-        
-        messy_table = ''' 
-            SELECT {0}, complete_address
-            FROM {1}
-        '''.format(primary_key, args.name)
-
-        curs = engine.execute(messy_table)
-
-        messy_data = ({'complete_address': r.complete_address} for r in curs)
-
-        deduper.drawSample(messy_data, sample_size=30000)
-        
-        if os.path.exists('geocoder/data/training.json'):
-            print('reading labeled examples from geocoder/data/training.json')
-            with open('geocoder/data/training.json') as tf :
-                deduper.readTraining(tf)
-        
-        dedupe.consoleLabel(deduper)
-
-        deduper.train(ppc=0.1, index_predicates=False)
-        
-        # When finished, save our training away to disk
-        with open('geocoder/data/training.json', 'w') as tf :
-            deduper.writeTraining(tf)
-
-        # Save our weights and predicates to disk.  If the settings file
-        # exists, we will skip all the training and learning next time we run
-        # this file.
-        with open('geocoder/dedupe.settings', 'wb') as sf :
-            deduper.writeSettings(sf)
-
-        deduper.cleanupTraining()
+        trainIncoming(args.name)
 
     if args.block:
-        from geocoder.deduper import StaticDatabaseGazetteer
-
-        engine = create_engine('postgresql://localhost:5432/geocoder')
-        
-        with open('geocoder/data/dedupe.settings', 'rb') as sf:
-            deduper = StaticDatabaseGazetteer(sf, engine=engine)
-        
-        # If we trained, re-block the county addresses table 
-        # in light of the newly trained settings file
-        if args.train:
-            deduper.createMatchBlocksTable()
-        
-        # Block the new table, too
-        deduper.createMatchBlocksTable(table_to_block=args.name,
-                                       match_blocks_table='%s_match_blocks' % args.name)
+        blockIncoming(args.name, args.train)
 
     if args.link:
         from geocoder.deduper import AddressLinkGazetteer
@@ -167,52 +187,88 @@ if __name__ == "__main__":
             'primary_key': primary_key,
         }
 
-        matches = deduper.match(messy_data_info, n_matches=5, threshold=0.75)
+        matches = deduper.match(messy_data_info, n_matches=5)
         
-        # From here, take the matches and update the messy data source with 
-        # canonical IDs. Or something ...
-        
-        add_address_id = ''' 
-            ALTER TABLE {0} ADD COLUMN address_id VARCHAR
-        '''.format(args.name)
-        
-        add_match_confidence = ''' 
-            ALTER TABLE {0} ADD COLUMN match_confidence DOUBLE PRECISION
-        '''.format(args.name)
-        
-        conn = engine.connect()
-        trans = conn.begin()
+        with open('geocoder/data/%s_matches.csv' % args.name, 'w') as f:
+            writer = csv.writer(f)
+            for match in matches:
+                for link in match:
+                    (messy_id, canonical_id), confidence = link
+                    if float(confidence) > 0.8:
+                        writer.writerow([int(messy_id), 
+                                         int(canonical_id), 
+                                         float(confidence)])
 
-        try:
-            conn.execute(add_address_id)
-            conn.execute(add_match_confidence)
-            trans.commit()
-        except sa.exc.ProgrammingError:
-            trans.rollback()
-            conn.close()
+        temp_matches_name = '{0}_temp_matches'.format(args.name)
+        temp_matches_table = ''' 
+            CREATE TABLE {0} (
+                messy_id INTEGER,
+                canonical_id INTEGER,
+                confidence DOUBLE PRECISION
+            )
+        '''.format(temp_matches_name)
 
-        for match in matches:
-            for link in match:
-                (messy_id, canonical_id), confidence = link
-                
-                if float(confidence) > 0.8:
-                    update_record = ''' 
-                        UPDATE {0} SET
-                          address_id = subq.address_id,
-                          match_confidence = :confidence
-                        FROM (
-                          SELECT
-                            address_id
-                          FROM cook_county_addresses
-                          WHERE id = :canonical_id
-                        ) AS subq
-                        WHERE {0}.id = :messy_id
-                    '''.format(args.name)
+        with engine.begin() as conn:
+            conn.execute('DROP TABLE IF EXISTS {0}'.format(temp_matches_name))
+            conn.execute(temp_matches_table)
+        
+        import psycopg2
+        from geocoder.app_config import DB_USER, DB_PW, DB_HOST, \
+            DB_PORT, DB_NAME
+        
+        DB_CONN_STR = 'host={0} dbname={1} user={2} port={3}'\
+            .format(DB_HOST, DB_NAME, DB_USER, DB_PORT)
 
-                    with engine.begin() as conn:
-                        conn.execute(sa.text(update_record), 
-                                     confidence=float(confidence),
-                                     canonical_id=int(canonical_id),
-                                     messy_id=int(messy_id))
-                    
-                    print('Saved: ', messy_id, canonical_id, confidence)
+        copy_st = ''' 
+            COPY {0} FROM STDIN WITH (FORMAT CSV, DELIMITER ',')
+        '''.format(temp_matches_name)
+        
+        with open('geocoder/data/%s_matches.csv' % args.name, 'r') as f:
+            next(f)
+            with psycopg2.connect(DB_CONN_STR) as conn:
+                with conn.cursor() as curs:
+                    try:
+                        curs.copy_expert(copy_st, f)
+                    except psycopg2.IntegrityError as e:
+                        print(e)
+                        conn.rollback()
+
+        update_records = ''' 
+            UPDATE {0} SET
+              address_id = subq.address_id,
+              match_confidence = subq.confidence
+            FROM (
+              SELECT
+                c.address_id,
+                t.messy_id,
+                t.confidence
+              FROM cook_county_addresses AS c
+              JOIN {1} AS t
+                ON c.id = t.canonical_id
+            ) AS subq
+            WHERE {0}.id = subq.messy_id
+        '''.format(args.name, temp_matches_name)
+
+        with engine.begin() as conn:
+            records = conn.execute(update_records)
+        
+        print('Saved: %s records' % records.rowcount)
+
+        while True:
+            unlinked_records = ''' 
+                SELECT COUNT(*) AS record_count
+                FROM {0}
+                WHERE address_id IS NULL
+            '''.format(args.name)
+
+            unlinked_count = engine.execute(unlinked_records)\
+                                 .first().record_count
+
+            retrain = input('''There are {0} records that were not matched. 
+Would you like to retrain with these records? (y or n) '''.format(unlinked_count))
+
+            if retrain == 'y':
+                trainIncoming(args.name)
+                blockIncoming(args.name, True)
+            else:
+                break
