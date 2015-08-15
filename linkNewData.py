@@ -137,9 +137,10 @@ if __name__ == "__main__":
         with open('geocoder/data/dedupe.settings', 'rb') as sf:
             deduper = StaticDatabaseGazetteer(sf, engine=engine)
         
-        # Re-block the county addresses table in light of the newly trained
-        # settings file
-        deduper.createMatchBlocksTable()
+        # If we trained, re-block the county addresses table 
+        # in light of the newly trained settings file
+        if args.train:
+            deduper.createMatchBlocksTable()
         
         # Block the new table, too
         deduper.createMatchBlocksTable(table_to_block=args.name,
@@ -170,4 +171,48 @@ if __name__ == "__main__":
         
         # From here, take the matches and update the messy data source with 
         # canonical IDs. Or something ...
-        print(matches[0])
+        
+        add_address_id = ''' 
+            ALTER TABLE {0} ADD COLUMN address_id VARCHAR
+        '''.format(args.name)
+        
+        add_match_confidence = ''' 
+            ALTER TABLE {0} ADD COLUMN match_confidence DOUBLE PRECISION
+        '''.format(args.name)
+        
+        conn = engine.connect()
+        trans = conn.begin()
+
+        try:
+            conn.execute(add_address_id)
+            conn.execute(add_match_confidence)
+            trans.commit()
+        except sa.exc.ProgrammingError:
+            trans.rollback()
+            conn.close()
+
+        for match in matches:
+            for link in match:
+                (messy_id, canonical_id), confidence = link
+                
+                if float(confidence) > 0.8:
+                    update_record = ''' 
+                        UPDATE {0} SET
+                          address_id = subq.address_id,
+                          match_confidence = :confidence
+                        FROM (
+                          SELECT
+                            address_id
+                          FROM cook_county_addresses
+                          WHERE id = :canonical_id
+                        ) AS subq
+                        WHERE {0}.id = :messy_id
+                    '''.format(args.name)
+
+                    with engine.begin() as conn:
+                        conn.execute(sa.text(update_record), 
+                                     confidence=float(confidence),
+                                     canonical_id=int(canonical_id),
+                                     messy_id=int(messy_id))
+                    
+                    print('Saved: ', messy_id, canonical_id, confidence)
