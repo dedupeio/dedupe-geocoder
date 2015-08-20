@@ -38,6 +38,7 @@ def trainIncoming(name):
         SELECT {0}, complete_address
         FROM {1}
         WHERE address_id IS NULL
+          AND complete_address IS NOT NULL
     '''.format(primary_key, name)
 
     curs = engine.execute(messy_table)
