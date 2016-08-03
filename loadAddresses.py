@@ -194,7 +194,13 @@ if __name__ == "__main__":
     cook_county_data_portal = 'https://datacatalog.cookcountyil.gov/api/geospatial/%s?method=export&format=Original'
 
     if args.load_data:
-        engine = create_engine('postgresql://localhost:5432/geocoder')
+        from geocoder.app_config import DB_USER, DB_PW, DB_HOST, \
+            DB_PORT, DB_NAME
+        if DB_PW != '':
+            engine = create_engine('postgresql+psycopg2://{0}:{1}@{2}:{3}/{4}'\
+                     .format(DB_USER, DB_PW, DB_HOST, DB_PORT, DB_NAME))
+        else:
+            engine = create_engine('postgresql:///' + DB_NAME)
         connection = engine.connect()
         
         chicago = ChicagoETL(connection, 'chicago_addresses')

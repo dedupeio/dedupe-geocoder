@@ -6,7 +6,7 @@ DB_USER = 'datamade'
 DB_PW = ''
 DB_HOST = 'localhost'
 DB_PORT = '5432'
-DB_NAME = 'sunshine'
+DB_NAME = 'geocoder'
 
 DB_CONN='postgresql+psycopg2://{0}:{1}@{2}:{3}/{4}'\
         .format(DB_USER, DB_PW, DB_HOST, DB_PORT, DB_NAME)
