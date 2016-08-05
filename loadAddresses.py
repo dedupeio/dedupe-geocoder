@@ -5,6 +5,7 @@ import re
 import os
 import sqlalchemy as sa
 from geocoder.data_loader import ETLThing
+from geocoder.app_config import DB_CONN
 
 class CookCountyETL(ETLThing):
 
@@ -194,13 +195,7 @@ if __name__ == "__main__":
     cook_county_data_portal = 'https://datacatalog.cookcountyil.gov/api/geospatial/%s?method=export&format=Original'
 
     if args.load_data:
-        from geocoder.app_config import DB_USER, DB_PW, DB_HOST, \
-            DB_PORT, DB_NAME
-        if DB_PW != '':
-            engine = create_engine('postgresql+psycopg2://{0}:{1}@{2}:{3}/{4}'\
-                     .format(DB_USER, DB_PW, DB_HOST, DB_PORT, DB_NAME))
-        else:
-            engine = create_engine('postgresql:///' + DB_NAME)
+        engine = create_engine(DB_CONN)
         connection = engine.connect()
         
         chicago = ChicagoETL(connection, 'chicago_addresses')
@@ -229,7 +224,8 @@ if __name__ == "__main__":
         import simplejson as json
         import dedupe
 
-        engine = create_engine('postgresql://localhost:5432/geocoder')
+        from geocoder.app_config import DB_CONN
+        engine = create_engine(DB_CONN) 
         
         deduper = DatabaseGazetteer([{'field': 'complete_address', 'type': 'Address'}],
                                     engine=engine)
@@ -261,7 +257,7 @@ if __name__ == "__main__":
     if args.block:
         from geocoder.deduper import StaticDatabaseGazetteer
 
-        engine = create_engine('postgresql://localhost:5432/geocoder')
+        engine = create_engine(DB_CONN)
         
         with open('geocoder/data/dedupe.settings', 'rb') as sf:
             deduper = StaticDatabaseGazetteer(sf, engine=engine)
