@@ -1,6 +1,6 @@
 import os
 import sqlalchemy as sa
-
+from geocoder.app_config import DB_CONN
 
 def checkForTable(engine, table_name):
     try:
@@ -22,7 +22,7 @@ def trainIncoming(name):
     import simplejson as json
     import dedupe
 
-    engine = create_engine('postgresql://localhost:5432/geocoder')
+    engine = create_engine(DB_CONN)
     
     deduper = DatabaseGazetteer([{'field': 'complete_address', 'type': 'Address'}],
                                 engine=engine)
@@ -71,7 +71,7 @@ def trainIncoming(name):
 def blockIncoming(name, train):
     from geocoder.deduper import StaticDatabaseGazetteer
 
-    engine = create_engine('postgresql://localhost:5432/geocoder')
+    engine = create_engine(DB_CONN)
     
     with open('geocoder/data/dedupe.settings', 'rb') as sf:
         deduper = StaticDatabaseGazetteer(sf, engine=engine)
@@ -170,7 +170,7 @@ if __name__ == "__main__":
     if args.link:
         from geocoder.deduper import AddressLinkGazetteer
 
-        engine = create_engine('postgresql://localhost:5432/geocoder')
+        engine = create_engine(DB_CONN)
         
         sql_table = checkForTable(engine, args.name)
         
