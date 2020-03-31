@@ -2,6 +2,8 @@
 
 Demonstration app to show how Dedupe might be used as a geocoder
 
+Part of the [Dedupe.io](https://dedupe.io/) cloud service and open source toolset for de-duplicating and finding fuzzy matches in your data.
+
 ## Setup
 
 **Install OS level dependencies:** 
